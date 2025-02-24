@@ -7,7 +7,9 @@ public class AntiCheatFrost {
     private static final Set<Integer> admins = new HashSet<>();
     private static final String currentVersion = "1.0.0";
     private static final int CHECK_INTERVAL = 5000; // Интервал проверки в миллисекундах
+    private static final int MAX_MESSAGE_REPEATED = 5; // Максимальное количество повторов сообщения
     private static final ExecutorService executorService = Executors.newFixedThreadPool(10);
+    private static final Map<Integer, Queue<String>> playerMessageHistory = new HashMap<>(); // Хранение истории сообщений игрока
 
     public static void main(String[] args) {
         // Подключаемся к серверу
@@ -38,123 +40,108 @@ public class AntiCheatFrost {
 
     // Проверка на подозрительное поведение игрока
     private static boolean isSuspicious(Player player) {
-        // Если игрок не администратор, проверяем на использование программ
-        if (!admins.contains(player.getId())) {
-            if (isCheatEngineDetected(player) || isArtMoneyDetected(player) || isGameGuardianDetected(player)) {
-                return true; // Игрок использует чит-программу
-            }
+        // Игнорируем администраторов
+        if (admins.contains(player.getId())) return false;
+
+        // Проверки на программы
+        if (isCheatEngineDetected(player) || isArtMoneyDetected(player) || isGameGuardianDetected(player)) {
+            return true;
         }
 
-        // Проверки на другие подозрительные действия
+        // Проверка на параметры игрока
         if (player.getSpeed() > 10 || player.getHealth() > 100 || player.isFlying()) {
             return true;
         }
 
-        // Проверка на высокий прыжок
-        if (isHighJumpDetected(player)) {
-            return true;
+        // Дополнительные проверки
+        return isHighJumpDetected(player) || isJumpingOrFlyingOnVehicle(player) || 
+               isMassAttackDetected(player) || isPassingThroughObjects(player) || 
+               isArmorModded(player) || isVisualTransportCheat(player);
+    }
+
+    // Антиспам система
+    private static void handleSpam(Player player, String message) {
+        if (!playerMessageHistory.containsKey(player.getId())) {
+            playerMessageHistory.put(player.getId(), new LinkedList<>());
         }
 
-        // Запрещаем прыжки и полеты на транспорте
-        if (isJumpingOrFlyingOnVehicle(player)) {
-            return true;
+        Queue<String> history = playerMessageHistory.get(player.getId());
+        history.add(message);
+        
+        if (history.size() > MAX_MESSAGE_REPEATED) {
+            history.poll();
         }
 
-        // Проверка на массовую атаку
-        if (isMassAttackDetected(player)) {
-            return true;
-        }
+        long sameMessagesCount = history.stream().filter(msg -> msg.equals(message)).count();
 
-        // Проверка на сквозное прохождение объектов
-        if (isPassingThroughObjects(player)) {
-            return true;
+        if (sameMessagesCount >= MAX_MESSAGE_REPEATED) {
+            System.out.println("Игрок " + player.getName() + " флудит сообщениями!");
+            SAMPAPI.sendMessageToPlayer(player.getId(), "Пожалуйста, не флудите!");
         }
-
-        // Проверка на изменение брони
-        if (isArmorModded(player)) {
-            return true;
-        }
-
-        // Проверка на визуальный транспорт (например, читы на невидимость)
-        if (isVisualTransportCheat(player)) {
-            return true;
-        }
-
-        return false;
     }
 
     // Проверка на использование CheatEngine
     private static boolean isCheatEngineDetected(Player player) {
-        if (player.getHealth() < 0 || player.getHealth() > 200) {
-            return true; // Нереалистичное изменение здоровья
-        }
-        if (player.getMoney() > 1000000) {
-            return true; // Подозрительное количество денег
-        }
-        return false;
+        return player.getHealth() < 0 || player.getHealth() > 200 || player.getMoney() > 1000000;
     }
 
     // Проверка на использование ArtMoney
     private static boolean isArtMoneyDetected(Player player) {
-        if (player.getMoney() > 1000000 || player.getWeapons().contains("cheat_weapon")) {
-            return true; // Подозрительное изменение денег или оружия
-        }
-        return false;
+        return player.getMoney() > 1000000 || player.getWeapons().contains("cheat_weapon");
     }
 
     // Проверка на использование GameGuardian
     private static boolean isGameGuardianDetected(Player player) {
-        if (player.getHealth() > 100) {
-            return true; // Игрок может изменять параметры здоровья
-        }
-        return false;
+        return player.getHealth() > 100;
     }
 
     // Проверка на высокий прыжок
     private static boolean isHighJumpDetected(Player player) {
-        if (player.getJumpHeight() > 5.0) { // Например, если прыжок больше 5 единиц
-            return true; // Высокий прыжок
-        }
-        return false;
+        return player.getJumpHeight() > 5.0;
     }
 
     // Запрещаем прыжки и полеты на транспорте
     private static boolean isJumpingOrFlyingOnVehicle(Player player) {
-        if (player.isOnVehicle()) {
-            if (player.isFlying() || player.getJumpHeight() > 0.5) { // Прерывание прыжков/полетов на транспорте
-                return true; // Игрок не может прыгать или летать на транспорте
-            }
-        }
-        return false;
+        return player.isOnVehicle() && (player.isFlying() || player.getJumpHeight() > 0.5);
     }
 
     // Проверка на массовую атаку
     private static boolean isMassAttackDetected(Player player) {
-        int attackCount = player.getAttackCount(); // Получаем количество атак
-        if (attackCount >= 10) {
-            return true; // Игрок атакует 10 или более игроков одновременно
-        }
-        return false;
+        return player.getAttackCount() >= 10;
     }
 
     // Проверка на сквозное прохождение объектов
     private static boolean isPassingThroughObjects(Player player) {
-        return player.getSpeed() > 10; // Если скорость игрока больше допустимой
+        return player.getSpeed() > 10;
     }
 
     // Проверка на изменение брони
     private static boolean isArmorModded(Player player) {
-        return player.getArmor() > 100; // Если броня больше обычного
+        return player.getArmor() > 100;
     }
 
     // Проверка на использование визуального транспорта (невидимый транспорт)
     private static boolean isVisualTransportCheat(Player player) {
-        return player.isOnInvisibleVehicle(); // Игрок едет на невидимом транспорте
+        return player.isOnInvisibleVehicle();
+    }
+
+    // Проверка инжектирования DLL
+    private static boolean isDllInjectionDetected(Player player) {
+        // Псевдокод для проверки инжектирования DLL
+        // Реализация на самом деле зависит от специфики сервера
+        // Проверим, если игрок имеет несоответствующие параметры
+
+        if (player.hasUnusualParameters()) {
+            System.out.println("Обнаружено возможное инжектирование DLL для игрока: " + player.getName());
+            return true;
+        }
+
+        // Для реальной проверки, можно отслеживать необычные изменения или внешние библиотеки
+        return false;
     }
 
     // Обфускация: Скрытие функции обновлений античита
     private static void checkForUpdates() {
-        // Псевдокод для обновления античита с внешнего сервера (например, GitHub)
         String latestVersion = "1.1.0"; // Получаем последнюю версию с сервера
         if (!currentVersion.equals(latestVersion)) {
             SAMPAPI.sendMessageToPlayer(0, "Доступна новая версия AntiCheatFrost! Версия: " + latestVersion);
@@ -186,14 +173,18 @@ public class AntiCheatFrost {
         public double getSpeed() { return speed; }
         public int getArmor() { return armor; }
         public double getJumpHeight() { return jumpHeight; }
-        public boolean isFlying() { return false; } // Логика определения полета
-        public boolean isOnVehicle() { return true; } // Логика определения, на транспорте ли игрок
-        public boolean isOnInvisibleVehicle() { return false; } // Логика невидимого транспорта
-        public int getAttackCount() { return attackCount; } // Получаем количество атак
+        public boolean isFlying() { return false; }
+        public boolean isOnVehicle() { return true; }
+        public boolean isOnInvisibleVehicle() { return false; }
+        public int getAttackCount() { return attackCount; }
         public List<String> getWeapons() { return weapons; }
 
         public boolean hasUnusualParameters() {
             return health > 100 || money > 1000000;
+        }
+
+        public String getName() {
+            return name;
         }
     }
 }
