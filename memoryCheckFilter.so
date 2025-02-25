@@ -1,0 +1,22 @@
+#include <iostream>
+#include <fstream>
+
+extern "C" {
+    void checkMemoryForCheats() {
+        // Примерная логика для поиска изменений в памяти
+        // Здесь могут быть сканированы адреса памяти на наличие изменений
+        // или использования небезопасных библиотек
+
+        std::ifstream memoryFile("/proc/self/maps");  // Пример для Linux
+        if (memoryFile.is_open()) {
+            std::string line;
+            while (getline(memoryFile, line)) {
+                if (line.find("cheatLib.so") != std::string::npos) {
+                    std::cerr << "Обнаружена модификация памяти: найден чит!" << std::endl;
+                    // Логируем информацию или сообщаем серверу
+                }
+            }
+            memoryFile.close();
+        }
+    }
+}

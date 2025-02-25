@@ -1,0 +1,35 @@
+#include <windows.h>
+#include <iostream>
+
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved)
+{
+    if (ul_reason_for_call == DLL_PROCESS_ATTACH)
+    {
+        // Пример: мониторинг процессора и выявление аномалий
+        DWORD processID = GetCurrentProcessId();
+        HANDLE processHandle = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, processID);
+
+        if (processHandle != NULL)
+        {
+            FILETIME creationTime, exitTime, kernelTime, userTime;
+            if (GetProcessTimes(processHandle, &creationTime, &exitTime, &kernelTime, &userTime))
+            {
+                // Проверяем использование процессора (псевдокод)
+                ULARGE_INTEGER kernelTimeLL, userTimeLL;
+                kernelTimeLL.LowPart = kernelTime.dwLowDateTime;
+                kernelTimeLL.HighPart = kernelTime.dwHighDateTime;
+                userTimeLL.LowPart = userTime.dwLowDateTime;
+                userTimeLL.HighPart = userTime.dwHighDateTime;
+
+                // Если время работы процесса слишком высокое или аномальное, возможно использование читов
+                if (kernelTimeLL.QuadPart + userTimeLL.QuadPart > 1000000000) // Примерный порог
+                {
+                    // Записать событие или уведомить сервер
+                    OutputDebugString(L"Подозрительная активность процесса - возможно SpeedHack!");
+                }
+            }
+            CloseHandle(processHandle);
+        }
+    }
+    return TRUE;
+}

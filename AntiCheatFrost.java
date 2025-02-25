@@ -1,161 +1,167 @@
+import java.io.*;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.logging.*;
 
 public class AntiCheatFrost {
-
+    private static final Properties config = new Properties();
     private static final Set<Integer> suspiciousPlayers = new HashSet<>();
     private static final Set<Integer> admins = new HashSet<>();
-    private static final String currentVersion = "1.0.0";
-    private static final int CHECK_INTERVAL = 5000; // Интервал проверки в миллисекундах
-    private static final int MAX_MESSAGE_REPEATED = 5; // Максимальное количество повторов сообщения
     private static final ExecutorService executorService = Executors.newFixedThreadPool(10);
-    private static final Map<Integer, Queue<String>> playerMessageHistory = new HashMap<>(); // Хранение истории сообщений игрока
+    private static final Map<Integer, Queue<String>> playerMessageHistory = new HashMap<>();
+    private static Logger logger = Logger.getLogger("AntiCheatFrostLogger");
 
     public static void main(String[] args) {
-        // Подключаемся к серверу
-        SAMPAPI.connect("127.0.0.1", 7777);
-
-        // Добавляем администраторов
-        admins.add(1);  // Предположим, что игрок с id = 1 — администратор
-
-        // Запуск проверки читеров
+        loadConfig();
+        setupLogger();
+        connectToServer();
         startCheatCheckLoop();
     }
 
-    // Цикл проверки игроков
+    // Загружаем конфигурацию из файла config.properties
+    private static void loadConfig() {
+        try {
+            FileInputStream fileInputStream = new FileInputStream("config.properties");
+            config.load(fileInputStream);
+            fileInputStream.close();
+            System.out.println("Конфигурация загружена.");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    // Настроим логирование
+    private static void setupLogger() {
+        try {
+            FileHandler fileHandler = new FileHandler(config.getProperty("logging.log_file_path"));
+            logger.addHandler(fileHandler);
+            fileHandler.setFormatter(new SimpleFormatter());
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    // Подключаемся к серверу
+    private static void connectToServer() {
+        String hostname = config.getProperty("server.hostname");
+        int port = Integer.parseInt(config.getProperty("server.port"));
+        System.out.println("Подключение к серверу " + hostname + " на порту " + port);
+        // SAMPAPI.connect(hostname, port); // Подключение к серверу
+    }
+
+    // Цикл проверки читеров
     private static void startCheatCheckLoop() {
         Runnable task = () -> {
-            List<Player> players = SAMPAPI.getPlayers();
+            List<Player> players = SAMPAPI.getPlayers(); // Получаем список игроков с сервера
             for (Player player : players) {
                 if (isSuspicious(player)) {
                     suspiciousPlayers.add(player.getId());
                     SAMPAPI.kickPlayer(player.getId(), "Использование читов");
+                    logger.warning("Игрок с ID " + player.getId() + " был кикнут за использование читов.");
                 }
             }
         };
 
         // Запускаем проверку с интервалом
-        executorService.scheduleAtFixedRate(task, 0, CHECK_INTERVAL, TimeUnit.MILLISECONDS);
+        executorService.scheduleAtFixedRate(task, 0, 5000, TimeUnit.MILLISECONDS);
     }
 
     // Проверка на подозрительное поведение игрока
     private static boolean isSuspicious(Player player) {
-        // Игнорируем администраторов
-        if (admins.contains(player.getId())) return false;
+        if (admins.contains(player.getId())) return false;  // Игнорируем администраторов
 
-        // Проверки на программы
         if (isCheatEngineDetected(player) || isArtMoneyDetected(player) || isGameGuardianDetected(player)) {
             return true;
         }
 
-        // Проверка на параметры игрока
         if (player.getSpeed() > 10 || player.getHealth() > 100 || player.isFlying()) {
             return true;
         }
 
-        // Дополнительные проверки
-        return isHighJumpDetected(player) || isJumpingOrFlyingOnVehicle(player) || 
-               isMassAttackDetected(player) || isPassingThroughObjects(player) || 
-               isArmorModded(player) || isVisualTransportCheat(player);
+        return isHighJumpDetected(player) || isJumpingOrFlyingOnVehicle(player) ||
+               isMassAttackDetected(player) || isPassingThroughObjects(player) ||
+               isArmorModded(player) || isVisualTransportCheat(player) ||
+               isLuaScriptDetected(player) || isCleoScriptDetected(player);
     }
 
-    // Антиспам система
-    private static void handleSpam(Player player, String message) {
-        if (!playerMessageHistory.containsKey(player.getId())) {
-            playerMessageHistory.put(player.getId(), new LinkedList<>());
+    // Проверка на использование Lua-скриптов
+    private static boolean isLuaScriptDetected(Player player) {
+        if (Boolean.parseBoolean(config.getProperty("lua_cheat_detection.enabled"))) {
+            // Проверка на Lua-скрипты
+            System.out.println("Детектировано использование Lua скриптов у игрока " + player.getName());
+            return true;
         }
-
-        Queue<String> history = playerMessageHistory.get(player.getId());
-        history.add(message);
-        
-        if (history.size() > MAX_MESSAGE_REPEATED) {
-            history.poll();
-        }
-
-        long sameMessagesCount = history.stream().filter(msg -> msg.equals(message)).count();
-
-        if (sameMessagesCount >= MAX_MESSAGE_REPEATED) {
-            System.out.println("Игрок " + player.getName() + " флудит сообщениями!");
-            SAMPAPI.sendMessageToPlayer(player.getId(), "Пожалуйста, не флудите!");
-        }
+        return false;
     }
 
-    // Проверка на использование CheatEngine
+    // Проверка на использование CLEO-скриптов
+    private static boolean isCleoScriptDetected(Player player) {
+        if (Boolean.parseBoolean(config.getProperty("cleo_cheat_detection.enabled"))) {
+            // Проверка на CLEO скрипты
+            System.out.println("Детектировано использование CLEO скриптов у игрока " + player.getName());
+            return true;
+        }
+        return false;
+    }
+
+    // Проверки на различные виды читов
     private static boolean isCheatEngineDetected(Player player) {
         return player.getHealth() < 0 || player.getHealth() > 200 || player.getMoney() > 1000000;
     }
 
-    // Проверка на использование ArtMoney
     private static boolean isArtMoneyDetected(Player player) {
         return player.getMoney() > 1000000 || player.getWeapons().contains("cheat_weapon");
     }
 
-    // Проверка на использование GameGuardian
     private static boolean isGameGuardianDetected(Player player) {
         return player.getHealth() > 100;
     }
 
-    // Проверка на высокий прыжок
     private static boolean isHighJumpDetected(Player player) {
         return player.getJumpHeight() > 5.0;
     }
 
-    // Запрещаем прыжки и полеты на транспорте
     private static boolean isJumpingOrFlyingOnVehicle(Player player) {
         return player.isOnVehicle() && (player.isFlying() || player.getJumpHeight() > 0.5);
     }
 
-    // Проверка на массовую атаку
     private static boolean isMassAttackDetected(Player player) {
         return player.getAttackCount() >= 10;
     }
 
-    // Проверка на сквозное прохождение объектов
     private static boolean isPassingThroughObjects(Player player) {
         return player.getSpeed() > 10;
     }
 
-    // Проверка на изменение брони
     private static boolean isArmorModded(Player player) {
         return player.getArmor() > 100;
     }
 
-    // Проверка на использование визуального транспорта (невидимый транспорт)
     private static boolean isVisualTransportCheat(Player player) {
         return player.isOnInvisibleVehicle();
     }
 
-    // Проверка инжектирования DLL
-    private static boolean isDllInjectionDetected(Player player) {
-        // Псевдокод для проверки инжектирования DLL
-        // Реализация на самом деле зависит от специфики сервера
-        // Проверим, если игрок имеет несоответствующие параметры
-
-        if (player.hasUnusualParameters()) {
-            System.out.println("Обнаружено возможное инжектирование DLL для игрока: " + player.getName());
+    // Проверка внешних библиотек
+    private static boolean isExternalCheatDetected(Player player) {
+        // Псевдокод для детекции использования DLL/SO файлов
+        if (isDllInjected() || isMemoryModified()) {
             return true;
         }
-
-        // Для реальной проверки, можно отслеживать необычные изменения или внешние библиотеки
         return false;
     }
 
-    // Обфускация: Скрытие функции обновлений античита
-    private static void checkForUpdates() {
-        String latestVersion = "1.1.0"; // Получаем последнюю версию с сервера
-        if (!currentVersion.equals(latestVersion)) {
-            SAMPAPI.sendMessageToPlayer(0, "Доступна новая версия AntiCheatFrost! Версия: " + latestVersion);
-        }
+    private static boolean isDllInjected() {
+        // Псевдокод для проверки инжектированных DLL файлов
+        System.out.println("Проверка на инжекцию DLL.");
+        return false;  // Это можно расширить
     }
 
-    // Псевдокод для взаимодействия с сервером SAMP
-    private static class SAMPAPI {
-        public static void connect(String host, int port) { /* Подключение к серверу */ }
-        public static List<Player> getPlayers() { return new ArrayList<>(); }
-        public static void sendMessageToPlayer(int playerId, String message) { /* Отправка сообщения игроку */ }
-        public static void kickPlayer(int playerId, String reason) { /* Кик игрока */ }
+    private static boolean isMemoryModified() {
+        // Псевдокод для проверки модификации памяти
+        System.out.println("Проверка на модификацию памяти.");
+        return false;  // Это можно расширить
     }
-
+    
     // Пример класса Player
     private static class Player {
         private int id;
@@ -168,6 +174,8 @@ public class AntiCheatFrost {
         private List<String> weapons;
         private int attackCount;
 
+        public int getId() { return id; }
+        public String getName() { return name; }
         public int getHealth() { return health; }
         public int getMoney() { return money; }
         public double getSpeed() { return speed; }
@@ -178,13 +186,12 @@ public class AntiCheatFrost {
         public boolean isOnInvisibleVehicle() { return false; }
         public int getAttackCount() { return attackCount; }
         public List<String> getWeapons() { return weapons; }
+    }
 
-        public boolean hasUnusualParameters() {
-            return health > 100 || money > 1000000;
-        }
-
-        public String getName() {
-            return name;
-        }
+    // Псевдокод для взаимодействия с сервером SAMP
+    private static class SAMPAPI {
+        public static void connect(String host, int port) { /* Подключение к серверу */ }
+        public static List<Player> getPlayers() { return new ArrayList<>(); }
+        public static void kickPlayer(int playerId, String reason) { /* Кик игрока */ }
     }
 }
